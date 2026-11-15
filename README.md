@@ -28,8 +28,14 @@ inserted). What changes is how symbols are stored and how scans are fed in.
 
 ## Install
 
+### using pip
 ```shell
-python3 -m pip install -U .
+pip install symbolicator-server
+```
+
+### using uv
+```shell
+uv tool install symbolicator-server
 ```
 
 ## Run the server
