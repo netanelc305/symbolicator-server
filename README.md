@@ -1,73 +1,95 @@
 # symbolicator-server
 
-A Python stand-in for ipswd's symbol server. It scans IPSWs into a SQLite
-database and serves the same `/v1/...` API, so `ipsw symbolicate --server`
-works against it.
-
-
-## How it differs from ipswd
-
-The API and the answers are the same: a lookup returns the same symbol ipswd
-would, including which one wins when several cover an address (the first one
-inserted). What changes is how symbols are stored and how scans are fed in.
-
-**Symbol storage**
-
-| | ipswd | symbolicator-server |
-|---|---|---|
-| Rows per symbol | 2: `symbols (id, name_id, start, end)` plus `macho_syms (macho_uuid, symbol_id)` | 1: `symbols (macho_id, off, seq, size, name_code)`, `WITHOUT ROWID` |
-| Mach-O reference | The 36-character UUID text, once per symbol | A small integer id |
-| Addresses | Absolute `start` and `end` | Offset from the Mach-O's `__TEXT` start, plus a size. Most values fit in 2-4 bytes |
-| Unnamed functions (`func_<addr>`) | A row in `names` each | No name row. Rebuilt from the address when read |
-| Same Mach-O seen again (the same shared cache in another device's IPSW, or a rescan) | All of its symbols are inserted again with new ids | Its symbol list is fingerprinted. A list already stored is skipped, and a list with new symbols only appends the new ones |
+A symbol server for Apple crash reports. It scans IPSWs into a SQLite database of symbols once, then
+symbolicates `.ips` reports (panics, stackshots, crashes) against it, for any device and build it holds.
 
 ## Requirements
 
 - Python 3.14
-- The [`ipsw`](https://github.com/blacktop/ipsw) CLI on your `PATH`, which does the scanning (`ipsw symbols --json`)
+- On the machine that runs the server:
+  - [`ipsw`](https://github.com/blacktop/ipsw), which extracts the symbols from IPSWs:
+
+    ```shell
+    brew install blacktop/tap/ipsw
+    ```
+
+  - The kernel signatures from [blacktop/symbolicator](https://github.com/blacktop/symbolicator), which `ipsw`
+    uses to name the functions of the stripped kernel and kexts:
+
+    ```shell
+    git clone https://github.com/blacktop/symbolicator.git
+    ```
 
 ## Install
 
-### using pip
 ```shell
-pip install symbolicator-server
+python3 -m pip install -U symbolicator-server
 ```
 
-### using uv
+or
+
 ```shell
 uv tool install symbolicator-server
 ```
 
-## Run the server
+## Usage
+
+### Run the server
 
 ```shell
-symbolicator-server --db syms.db
+symbolicator serve syms.db /PATH/TO/symbolicator/kernel
 ```
 
-or `python3 -m symbolicator_server --db syms.db`.
+- `syms.db` is the database the symbols are kept in. It is created if it does not exist; `--override-db`
+  replaces an existing one with a new, empty database.
+- `/PATH/TO/symbolicator/kernel` is the `kernel` folder of the `symbolicator` repository you cloned.
+- `--host` and `--port` (default `localhost:3993`) set where it listens; `-v` logs every name a scan adds or keeps.
 
-| Option | Default | |
-|---|---|---|
-| `--db` | (required) | SQLite database file, created if missing |
-| `--host` / `--port` | `localhost` / `3993` | Where to listen |
-| `--sigs-dir` | | Default kernel signatures dir for scans |
-| `--pem-db` | | Default AEA pem DB for scans |
-| `--ipsw-bin` | `ipsw` on `PATH` | The ipsw CLI used to scan |
-| `-v`, `--verbose` | | Log every image of a scan |
-
-## Scan an IPSW
+### Scan an IPSW
 
 ```shell
-curl -X POST "http://localhost:3993/v1/syms/scan?path=/PATH/TO/IPSW.ipsw"
+symbolicator scan iPhone17,1_18.2_22C152_Restore.ipsw
+
+✓ 0:00:42 Uploaded: 8.1 / 8.1 GB
+⠏ 0:01:22 Loaded: 2,200 images, 4,113,810 symbols
 ```
 
-The scan runs as a single transaction, and lookups keep working while it runs.
-Scanning an IPSW that is already in the database returns `409`. To scan it
-again and merge in anything new, use `PUT /v1/syms/rescan?path=...`. Both
-accept optional `sig_dir` and `pem_db` query parameters.
+An IPSW that is already loaded is refused; `--force` loads it again.
 
-## Symbolicate a crash
+### Symbolicate a report
 
 ```shell
-ipsw symbolicate --server http://localhost:3993 CRASH-REPORT.ips --proc "SpringBoard"
+symbolicator symbolicate stacks-2026-09-25-201009.ips -p thermalmonitord
 ```
+
+```
+[25Sep2026 20:10:09] - Stackshot - iPhone13,4 iPhone OS 26.5.2 (23F84)
+Reason: stackshot via sysdiagnose
+...
+Process: thermalmonitord [66]
+  Thread: 1655
+    State:          TH_WAIT
+    Base Priority:  37
+    Sched Priority: 37
+    User Time:      1937232 usec
+    System Time:    3069104 usec
+    User Frames:
+      00: libsystem_kernel.dylib  0x2322c1cd4  _mach_msg2_trap + 8
+      01: libsystem_kernel.dylib  0x2322c522c  _mach_msg_overwrite + 424
+      02: libsystem_kernel.dylib  0x2322c5078  _mach_msg + 24
+      03: CoreFoundation          0x18354a344  ___CFRunLoopServiceMachPort + 160
+      ...
+```
+
+By default only the panicked process is shown (every process for reports without one). `-p NAME` shows one
+process, `-a` all of them, and `--json` prints the server's JSON instead.
+
+### Database stats
+
+```shell
+symbolicator stats        # size and rows per table
+symbolicator stats -v     # and the loaded IPSWs
+```
+
+The client commands talk to `http://localhost:3993` by default; set `-s URL` or `SYMBOLICATOR_SERVER` for
+another server.

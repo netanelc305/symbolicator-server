@@ -23,10 +23,13 @@ dynamic = ["dependencies", "version"]
 "Bug Reports" = "https://github.com/netanelc305/symbolicator-server/issues"
 
 [project.scripts]
-symbolicator-server = "symbolicator_server.__main__:main"
+symbolicator = "symbolicator_server.__main__:main"
 
 [tool.setuptools.packages.find]
 exclude = ["docs*", "tests*"]
+
+[tool.setuptools.package-data]
+symbolicator_server = ["schema.sql"]
 
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
