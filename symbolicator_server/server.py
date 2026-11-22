@@ -9,12 +9,14 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from starlette.requests import ClientDisconnect
 
+from symbolicator_server._version import __version__
 from symbolicator_server.console import setup_server_logging
 from symbolicator_server.exceptions import InvalidReportError, IpswAlreadyLoadedError
 from symbolicator_server.ips_report import IpsReport
 from symbolicator_server.ipsw_scan import IpswScanner
+from symbolicator_server.models import API_VERSION, ServerVersion
 from symbolicator_server.symbolicator import Symbolicator
-from symbolicator_server.symbols_dao import SymbolsDao
+from symbolicator_server.symbols_dao import SCHEMA_VERSION, SymbolsDao
 
 NDJSON = "application/x-ndjson"
 
@@ -66,6 +68,12 @@ async def post_symbolicate(request: Request):
         return error_response(400, str(e))
 
 
+@app.get("/version")
+def get_version():
+    """ The server's package, API and database schema versions. Clients check the API version first. """
+    return dataclasses.asdict(ServerVersion(__version__, API_VERSION, SCHEMA_VERSION))
+
+
 @app.get("/stats")
 def get_stats(request: Request):
     """ Database size, rows per table, and the loaded IPSWs. """
@@ -78,7 +86,7 @@ def serve(database_path: Path, signatures: Path, host: str, port: int, verbose: 
     setup_server_logging(verbose)
     scanner = IpswScanner.create(database_path, signatures)
     with SymbolsDao.open(database_path) as dao:
-        dao.create_tables()
+        dao.setup_schema()
     app.state.database_path = database_path
     app.state.scanner = scanner
     uvicorn.run(app, host=host, port=port, log_config=None)  # log_config=None: uvicorn logs through ours too

@@ -6,6 +6,7 @@ from typer import style
 
 # Kernel addresses have bit 63 set; the scanner stores them with it cleared, but its func_ names keep it.
 HIGH_BIT = 1 << 63
+API_VERSION = 1  # Bump on every API change
 
 
 @dataclass
@@ -97,6 +98,18 @@ class ImageRecord:
     @property
     def text_size(self) -> int:
         return self.text_end - self.text_start
+
+
+@dataclass
+class ServerVersion:
+    """ What the server runs: its package version, HTTP API version and database schema version. """
+    version: str
+    api: int
+    schema: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ServerVersion":
+        return cls(data["version"], data["api"], data["schema"])
 
 
 @dataclass

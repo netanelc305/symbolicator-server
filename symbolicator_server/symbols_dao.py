@@ -1,19 +1,23 @@
 import hashlib
 import json
+import re
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Optional
 
+from symbolicator_server.exceptions import DatabaseVersionError
 from symbolicator_server.models import DatabaseStats, Image, ImageRecord, Ipsw, IpswStats, SymbolMatch
 
 SCHEMA = Path(__file__).parent / "schema.sql"
+SCHEMA_VERSION = 1  # Bump on every schema change
 SQLITE_SIDE_FILES = ["-wal", "-shm"]
 TABLES = ["ipsw", "dsc", "image", "ipsw_image", "kernelcache_kext", "macho", "symbol", "name"]
 IMAGE_COLUMNS = ("image.id, image.macho_id, image.kind, image.path, image.text_start, image.text_size, "
                  "image.dsc_uuid, image.cpu, image.arch, image.kernel_version, image.offset_base")
 ROWS_PER_INSERT = 100_000
 NAMES_PER_QUERY = 10_000  # SQLite allows only so many values in one query
+WHITESPACE = re.compile(r"\s+")
 
 
 class SymbolsDao:
@@ -43,12 +47,44 @@ class SymbolsDao:
             deleted.append(file)
         return deleted
 
-    def create_tables(self) -> None:
-        """ Create the tables that are missing. """
+    def get_schema_version(self) -> int:
+        """ The schema version saved in the database file; 0 for a new database or one made before versions. """
+        return self.connection.execute("PRAGMA user_version").fetchone()[0]
+
+    def setup_schema(self) -> None:
+        """ Create the tables of a new database, or verify an existing one has the schema this code reads. """
+        version = self.get_schema_version()
+        if version == 0 and self._is_empty():
+            self._create_tables()
+            return
+        if version == 0 and self._matches_schema():
+            # made before databases had a version, but with this very schema
+            self._set_schema_version(SCHEMA_VERSION)
+            return
+        if version != SCHEMA_VERSION:
+            raise DatabaseVersionError(self.path, version, SCHEMA_VERSION)
+
+    def _create_tables(self) -> None:
         self.connection.executescript(SCHEMA.read_text())
         # WAL lets symbolication read the database while a scan is writing to it.
         # The setting is saved in the database file, so setting it once is enough.
         self.connection.execute("PRAGMA journal_mode = WAL")
+        self._set_schema_version(SCHEMA_VERSION)
+
+    def _set_schema_version(self, version: int) -> None:
+        self.connection.execute(f"PRAGMA user_version = {version}")  # a pragma takes no ? parameters
+        self.connection.commit()
+
+    def _is_empty(self) -> bool:
+        return self.connection.execute("SELECT count(*) FROM sqlite_master").fetchone()[0] == 0
+
+    def _matches_schema(self) -> bool:
+        """ Whether the database has exactly the tables and indexes schema.sql creates. """
+        expected = sqlite3.connect(":memory:")
+        expected.executescript(SCHEMA.read_text())
+        matches = get_schema_statements(expected) == get_schema_statements(self.connection)
+        expected.close()
+        return matches
 
     def commit(self) -> None:
         self.connection.commit()
@@ -297,3 +333,12 @@ def name_hash(text: str) -> int:
 def chunks(items: list, size: int) -> Iterator[list]:
     for i in range(0, len(items), size):
         yield items[i:i + size]
+
+
+def get_schema_statements(connection: sqlite3.Connection) -> list[str]:
+    """ The CREATE statements of the database's tables and indexes, without whitespace. """
+    statements = []
+    for (sql,) in connection.execute("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name"):
+        # SQLite keeps each statement as it was written: the same table can be written spaced differently
+        statements.append(WHITESPACE.sub("", sql))
+    return statements

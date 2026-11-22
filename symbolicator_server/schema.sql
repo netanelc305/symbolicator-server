@@ -1,4 +1,5 @@
 -- The symbols database, built from `ipsw symbols --json` output.
+-- Bump SCHEMA_VERSION in symbols_dao.py on every schema change.
 
 -- One loaded IPSW. sha1 is of the .ipsw file: the scanner's "id".
 CREATE TABLE IF NOT EXISTS ipsw (
