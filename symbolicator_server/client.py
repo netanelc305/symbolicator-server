@@ -4,7 +4,7 @@ import urllib.parse
 import urllib.request
 from http.client import HTTPResponse
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, Optional, Union
 
 from symbolicator_server.console import ScanProgress
 from symbolicator_server.exceptions import ServerError, ServerUnreachableError
@@ -68,7 +68,7 @@ class SymbolicatorClient:
         with self._open(urllib.request.Request(f"{self.server}/stats")) as response:
             return DatabaseStats.from_dict(json.load(response))
 
-    def _post(self, path: str, body: bytes | UploadProgress, size: int | None = None) -> HTTPResponse:
+    def _post(self, path: str, body: Union[bytes, UploadProgress], size: Optional[int] = None) -> HTTPResponse:
         headers = {}
         if size is not None:
             headers["Content-Length"] = str(size)  # urllib cannot tell a file's size by itself

@@ -2,7 +2,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Optional
 
 import typer
 
@@ -62,7 +62,7 @@ def cli_symbolicate(
         report_path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, metavar="REPORT",
                                                     help=".ips report")],
         server: Server = DEFAULT_SERVER,
-        proc: Annotated[str | None, typer.Option("--proc", "-p", help="Only this process (its name)")] = None,
+        proc: Annotated[Optional[str], typer.Option("--proc", "-p", help="Only this process (its name)")] = None,
         all_procs: Annotated[bool, typer.Option("--all", "-a",
                                                 help="Every process, not only the panicked one")] = False,
         as_json: Annotated[bool, typer.Option("--json", help="Print the server's JSON")] = False,

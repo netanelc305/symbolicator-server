@@ -1,6 +1,6 @@
 import dataclasses
 from dataclasses import dataclass, field
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Optional
 
 from typer import style
 
@@ -16,7 +16,7 @@ class Ipsw:
     name: str
     version: str
     build: str
-    platform: str | None
+    platform: Optional[str]
     devices: list[str]
 
 
@@ -29,11 +29,11 @@ class Image:
     path: str
     text_start: int
     text_size: int
-    dsc_uuid: str | None
-    cpu: str | None
-    arch: str | None
-    kernel_version: str | None
-    offset_base: int | None
+    dsc_uuid: Optional[str]
+    cpu: Optional[str]
+    arch: Optional[str]
+    kernel_version: Optional[str]
+    offset_base: Optional[int]
 
     @classmethod
     def from_row(cls, row: tuple) -> "Image":
@@ -47,13 +47,15 @@ class Image:
 class SymbolMatch(NamedTuple):
     """ The function covering an address. """
     offset: int
-    name: str | None  # None for an unnamed function
+    name: Optional[str]  # None for an unnamed function
 
 
-@dataclass(slots=True)
+@dataclass
 class SymbolRecord:
     """ One function of the scanner's output. """
-    name: str | None  # None for the scanner's func_<address> placeholders and empty names
+    # an IPSW has millions of these; slots keep each one small (dataclass(slots=True) needs 3.10)
+    __slots__ = ("name", "start", "end")
+    name: Optional[str]  # None for the scanner's func_<address> placeholders and empty names
     start: int
     end: int
 
@@ -81,10 +83,10 @@ class ImageRecord:
     path: str
     text_start: int
     text_end: int
-    dsc_uuid: str | None
-    cpu: str | None
-    arch: str | None
-    kernel_version: str | None
+    dsc_uuid: Optional[str]
+    cpu: Optional[str]
+    arch: Optional[str]
+    kernel_version: Optional[str]
     symbols: list[SymbolRecord] = field(default_factory=list)
 
     @classmethod

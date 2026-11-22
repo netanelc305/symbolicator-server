@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from operator import attrgetter
-from typing import Any
+from typing import Any, Optional
 
 from typer import style
 
@@ -34,10 +34,10 @@ class Frame:
     """ A stack frame: an offset into one of the report's binary images, then what symbolication found. """
     image_index: int
     image_offset: int
-    image: str | None = None
-    address: int | None = None
-    symbol: str | None = None
-    offset: int | None = None
+    image: Optional[str] = None
+    address: Optional[int] = None
+    symbol: Optional[str] = None
+    offset: Optional[int] = None
 
 
 @dataclass
@@ -45,20 +45,20 @@ class PanicFrame:
     """ A frame of the panic string's backtrace. Its address is slid: where the kernel was in memory. """
     slid_address: int
     address: int
-    image: str | None = None
-    symbol: str | None = None
-    offset: int | None = None
+    image: Optional[str] = None
+    symbol: Optional[str] = None
+    offset: Optional[int] = None
 
 
 @dataclass
 class ReportThread:
     id: int
-    name: str | None
-    state: list[str] | None
-    base_priority: int | None
-    sched_priority: int | None
-    user_usec: int | None
-    system_usec: int | None
+    name: Optional[str]
+    state: Optional[list[str]]
+    base_priority: Optional[int]
+    sched_priority: Optional[int]
+    user_usec: Optional[int]
+    system_usec: Optional[int]
     kernel_frames: list[Frame]
     user_frames: list[Frame]
 
@@ -82,7 +82,7 @@ class ReportThread:
 @dataclass
 class ReportProcess:
     pid: int
-    name: str | None
+    name: Optional[str]
     threads: list[ReportThread]
 
     @classmethod
@@ -99,12 +99,12 @@ class IpsReport:
     parse() reads the report as it is; Symbolicator.symbolicate() returns a copy with the frames' images,
     addresses and symbols filled in, the panic string's backtrace, and the images the database lacks.
     """
-    bug_type: str | None
-    timestamp: str | None
-    os_version: str | None
-    product: str | None
-    panic_string: str | None
-    reason: str | None
+    bug_type: Optional[str]
+    timestamp: Optional[str]
+    os_version: Optional[str]
+    product: Optional[str]
+    panic_string: Optional[str]
+    reason: Optional[str]
     memory_status: dict[str, Any]
     notes: list[str]
     binary_images: list[BinaryImage]
@@ -154,7 +154,7 @@ class IpsReport:
                    data["missing_images"])
 
     @property
-    def panicked_pid(self) -> int | None:
+    def panicked_pid(self) -> Optional[int]:
         """ The pid in the panic string's "Panicked task ... pid 0: kernel_task" line, or None. """
         if not self.panic_string:
             return None
@@ -163,7 +163,7 @@ class IpsReport:
             return None
         return int(match.group(1))
 
-    def format(self, proc: str | None = None, all_procs: bool = False) -> str:
+    def format(self, proc: Optional[str] = None, all_procs: bool = False) -> str:
         """
         The colored terminal view, symbolicated or not: title, panic string and its backtrace, memory status,
         the processes by pid and their threads by id, then the notes.
@@ -218,7 +218,7 @@ class IpsReport:
         kind = BUG_TYPES.get(self.bug_type or "", f"bug_type {self.bug_type}")
         return f"[{timestamp}] - {kind} - {self.product} {self.os_version}"
 
-    def _processes_to_show(self, proc: str | None, all_procs: bool) -> list[ReportProcess]:
+    def _processes_to_show(self, proc: Optional[str], all_procs: bool) -> list[ReportProcess]:
         panicked_pid = self.panicked_pid
         processes = []
         for process in self.processes:
@@ -259,7 +259,7 @@ class IpsReport:
             lines.extend(frame_lines(self._frame_columns(thread.user_frames)))
         return lines
 
-    def _frame_columns(self, frames: list[Frame]) -> list[tuple[str, str, str | None, int | None]]:
+    def _frame_columns(self, frames: list[Frame]) -> list[tuple[str, str, Optional[str], Optional[int]]]:
         """ (image, address, symbol, offset) of each frame. """
         columns = []
         for frame in frames:
@@ -282,7 +282,7 @@ class IpsReport:
         return self.format()
 
 
-def image_name(path: str | None) -> str:
+def image_name(path: Optional[str]) -> str:
     if not path:
         return "???"
     return path.split("/")[-1]
@@ -292,7 +292,7 @@ def field_line(label: str, value: str) -> str:
     return style(f"    {label + ':':<16}", dim=True) + value
 
 
-def frame_lines(columns: list[tuple[str, str, str | None, int | None]]) -> list[str]:
+def frame_lines(columns: list[tuple[str, str, Optional[str], Optional[int]]]) -> list[str]:
     """ One line per frame: index, image, address, symbol + offset, the columns as wide as their longest entry. """
     image_width = 0
     address_width = 0
@@ -314,7 +314,7 @@ def frame_lines(columns: list[tuple[str, str, str | None, int | None]]) -> list[
     return lines
 
 
-def symbol_with_offset(symbol: str, offset: int | None) -> str:
+def symbol_with_offset(symbol: str, offset: Optional[int]) -> str:
     if offset:
         return f"{symbol} + {offset}"
     return symbol

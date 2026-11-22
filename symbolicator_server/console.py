@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 from rich import get_console
 from rich.console import Console
@@ -29,7 +30,7 @@ class ScanProgress:
     def __init__(self, progress: Progress, upload_task: TaskID):
         self.progress = progress
         self.upload_task = upload_task
-        self.load_task: TaskID | None = None
+        self.load_task: Optional[TaskID] = None
 
     @classmethod
     def start(cls) -> "ScanProgress":
