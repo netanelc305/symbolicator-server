@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
+from typing import Union
 
 from plumbum import local
 from plumbum.commands.processes import CommandNotFound
@@ -143,5 +144,5 @@ class IpswScan:
         return f"<{self.__class__.__name__} PATH:{self.ipsw_path}>"
 
 
-def stage_line(key: str, value: str | dict) -> str:
+def stage_line(key: str, value: Union[str, dict]) -> str:
     return json.dumps({key: value}) + "\n"

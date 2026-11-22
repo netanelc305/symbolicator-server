@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Optional
 
 
 class SymbolicatorException(Exception):
@@ -7,7 +8,7 @@ class SymbolicatorException(Exception):
 
 class ScannerOutputError(SymbolicatorException):
     """ Raised when the input is not `ipsw symbols --json` output. """
-    def __init__(self, reason: str, line_number: int | None = None):
+    def __init__(self, reason: str, line_number: Optional[int] = None):
         super().__init__()
         self.reason = reason
         self.line_number = line_number
@@ -60,7 +61,25 @@ class ServerUnreachableError(SymbolicatorException):
 
 class ServerError(SymbolicatorException):
     """ Raised when the server answers with an error. """
-    def __init__(self, message: str, status_code: int | None = None):
+    def __init__(self, message: str, status_code: Optional[int] = None):
         super().__init__()
         self.message = message
         self.status_code = status_code
+
+
+class DatabaseVersionError(SymbolicatorException):
+    """ Raised when the database has another schema version than the one this code reads. """
+    def __init__(self, path: Path, found: int, expected: int):
+        super().__init__()
+        self.path = path
+        self.found = found
+        self.expected = expected
+
+
+class IncompatibleServerError(SymbolicatorException):
+    """ Raised when the server speaks another API version than this client. """
+    def __init__(self, server: str, server_api: Optional[int], client_api: int):
+        super().__init__()
+        self.server = server
+        self.server_api = server_api  # None: the server is from before API versions
+        self.client_api = client_api

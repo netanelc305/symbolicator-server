@@ -1,7 +1,7 @@
 import json
 import logging
 from collections.abc import Iterable, Iterator
-from typing import Any
+from typing import Any, Optional
 
 from symbolicator_server.exceptions import IpswAlreadyLoadedError, ScannerOutputError
 from symbolicator_server.models import ImageRecord, Ipsw, SymbolRecord
@@ -35,11 +35,11 @@ class IpswLoader:
         self.dao = dao
         self.force = force
         self.counts = {"ipsw": 0, "dsc": 0, "image": 0, "symbol": 0}
-        self.ipsw: Ipsw | None = None
-        self._image: ImageRecord | None = None
+        self.ipsw: Optional[Ipsw] = None
+        self._image: Optional[ImageRecord] = None
         # The scanner writes a kernelcache's record followed by its kexts' records: that order is the
         # only place it says which kexts are in which kernelcache.
-        self._kernelcache_id: int | None = None
+        self._kernelcache_id: Optional[int] = None
         self._record_loaders = {
             "dsc": self._load_dsc_record,
             "image": self._load_image_record,
@@ -149,7 +149,7 @@ class IpswLoader:
             self._merge_symbols(macho_id, image.offset_base, record, stored)
 
     def _merge_symbols(self, macho_id: int, offset_base: int, record: ImageRecord,
-                       stored: dict[int, int | None]) -> None:
+                       stored: dict[int, Optional[int]]) -> None:
         """ Add the new functions of this copy and the names the stored ones are missing. """
         names = set()
         for symbol in record.symbols:
@@ -194,7 +194,7 @@ class IpswLoader:
                         f"added {len(new_rows)} functions")
 
 
-def find_offset_base(stored: dict[int, int | None], record: ImageRecord) -> int | None:
+def find_offset_base(stored: dict[int, Optional[int]], record: ImageRecord) -> Optional[int]:
     """
     The address of offset 0 in this copy, so that its functions line up with the stored ones.
 
@@ -228,7 +228,7 @@ def find_offset_base(stored: dict[int, int | None], record: ImageRecord) -> int 
     return None
 
 
-def count_lined_up(stored: dict[int, int | None], starts: list[int], base: int) -> int:
+def count_lined_up(stored: dict[int, Optional[int]], starts: list[int], base: int) -> int:
     """ How many of the starts land on a stored function when offset 0 is at base. """
     count = 0
     for start in starts:

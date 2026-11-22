@@ -1,18 +1,23 @@
 import hashlib
 import json
+import re
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Optional
 
+from symbolicator_server.exceptions import DatabaseVersionError
 from symbolicator_server.models import DatabaseStats, Image, ImageRecord, Ipsw, IpswStats, SymbolMatch
 
 SCHEMA = Path(__file__).parent / "schema.sql"
+SCHEMA_VERSION = 1  # Bump on every schema change
 SQLITE_SIDE_FILES = ["-wal", "-shm"]
 TABLES = ["ipsw", "dsc", "image", "ipsw_image", "kernelcache_kext", "macho", "symbol", "name"]
 IMAGE_COLUMNS = ("image.id, image.macho_id, image.kind, image.path, image.text_start, image.text_size, "
                  "image.dsc_uuid, image.cpu, image.arch, image.kernel_version, image.offset_base")
 ROWS_PER_INSERT = 100_000
 NAMES_PER_QUERY = 10_000  # SQLite allows only so many values in one query
+WHITESPACE = re.compile(r"\s+")
 
 
 class SymbolsDao:
@@ -42,12 +47,44 @@ class SymbolsDao:
             deleted.append(file)
         return deleted
 
-    def create_tables(self) -> None:
-        """ Create the tables that are missing. """
+    def get_schema_version(self) -> int:
+        """ The schema version saved in the database file; 0 for a new database or one made before versions. """
+        return self.connection.execute("PRAGMA user_version").fetchone()[0]
+
+    def setup_schema(self) -> None:
+        """ Create the tables of a new database, or verify an existing one has the schema this code reads. """
+        version = self.get_schema_version()
+        if version == 0 and self._is_empty():
+            self._create_tables()
+            return
+        if version == 0 and self._matches_schema():
+            # made before databases had a version, but with this very schema
+            self._set_schema_version(SCHEMA_VERSION)
+            return
+        if version != SCHEMA_VERSION:
+            raise DatabaseVersionError(self.path, version, SCHEMA_VERSION)
+
+    def _create_tables(self) -> None:
         self.connection.executescript(SCHEMA.read_text())
         # WAL lets symbolication read the database while a scan is writing to it.
         # The setting is saved in the database file, so setting it once is enough.
         self.connection.execute("PRAGMA journal_mode = WAL")
+        self._set_schema_version(SCHEMA_VERSION)
+
+    def _set_schema_version(self, version: int) -> None:
+        self.connection.execute(f"PRAGMA user_version = {version}")  # a pragma takes no ? parameters
+        self.connection.commit()
+
+    def _is_empty(self) -> bool:
+        return self.connection.execute("SELECT count(*) FROM sqlite_master").fetchone()[0] == 0
+
+    def _matches_schema(self) -> bool:
+        """ Whether the database has exactly the tables and indexes schema.sql creates. """
+        expected = sqlite3.connect(":memory:")
+        expected.executescript(SCHEMA.read_text())
+        matches = get_schema_statements(expected) == get_schema_statements(self.connection)
+        expected.close()
+        return matches
 
     def commit(self) -> None:
         self.connection.commit()
@@ -68,7 +105,7 @@ class SymbolsDao:
     # IPSWs and shared caches
     # ---------------------------------------------------------------------------
 
-    def get_ipsw_by_sha1(self, sha1: str) -> Ipsw | None:
+    def get_ipsw_by_sha1(self, sha1: str) -> Optional[Ipsw]:
         row = self.connection.execute(
             "SELECT id, sha1, name, version, build, platform, devices FROM ipsw WHERE sha1 = ?", (sha1,)).fetchone()
         if row is None:
@@ -79,7 +116,7 @@ class SymbolsDao:
     def is_ipsw_loaded(self, sha1: str) -> bool:
         return self.connection.execute("SELECT 1 FROM ipsw WHERE sha1 = ?", (sha1,)).fetchone() is not None
 
-    def add_ipsw(self, sha1: str, name: str, version: str, build: str, platform: str | None,
+    def add_ipsw(self, sha1: str, name: str, version: str, build: str, platform: Optional[str],
                  devices: list[str]) -> Ipsw:
         ipsw_id = self.connection.execute(
             "INSERT INTO ipsw (sha1, name, version, build, platform, devices) VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
@@ -111,7 +148,7 @@ class SymbolsDao:
         self.connection.execute("INSERT INTO dsc (ipsw_id, uuid, shared_region_start) VALUES (?, ?, ?)",
                                 (ipsw_id, uuid, shared_region_start))
 
-    def get_shared_region_start(self, dsc_uuid: str) -> int | None:
+    def get_shared_region_start(self, dsc_uuid: str) -> Optional[int]:
         row = self.connection.execute(
             "SELECT shared_region_start FROM dsc WHERE uuid = ? LIMIT 1", (dsc_uuid,)).fetchone()
         if row is None:
@@ -122,7 +159,7 @@ class SymbolsDao:
     # UUIDs and images
     # ---------------------------------------------------------------------------
 
-    def get_macho_id(self, uuid: str) -> int | None:
+    def get_macho_id(self, uuid: str) -> Optional[int]:
         row = self.connection.execute("SELECT id FROM macho WHERE uuid = ?", (uuid,)).fetchone()
         if row is None:
             return None
@@ -132,7 +169,7 @@ class SymbolsDao:
         """ Add the UUID; returns its id. """
         return self.connection.execute("INSERT INTO macho (uuid) VALUES (?) RETURNING id", (uuid,)).fetchone()[0]
 
-    def find_image(self, macho_id: int, record: ImageRecord) -> Image | None:
+    def find_image(self, macho_id: int, record: ImageRecord) -> Optional[Image]:
         """ The stored image that is this record: same UUID, path, kind and place. """
         row = self.connection.execute(
             f"SELECT {IMAGE_COLUMNS} FROM image "
@@ -143,7 +180,7 @@ class SymbolsDao:
             return None
         return Image.from_row(row)
 
-    def add_image(self, macho_id: int, record: ImageRecord, offset_base: int | None) -> Image:
+    def add_image(self, macho_id: int, record: ImageRecord, offset_base: Optional[int]) -> Image:
         image_id = self.connection.execute(
             "INSERT INTO image (macho_id, kind, path, text_start, text_size, dsc_uuid, cpu, arch, kernel_version, "
             "offset_base) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
@@ -178,7 +215,7 @@ class SymbolsDao:
             (kernelcache_uuid,)).fetchall()
         return [Image.from_row(row) for row in rows]
 
-    def find_dylib_in_cache(self, dsc_uuid: str, address: int) -> Image | None:
+    def find_dylib_in_cache(self, dsc_uuid: str, address: int) -> Optional[Image]:
         """ The dylib of the given shared cache whose __TEXT contains address. """
         row = self.connection.execute(
             f"SELECT {IMAGE_COLUMNS} FROM image "
@@ -192,7 +229,7 @@ class SymbolsDao:
     # Symbols and names
     # ---------------------------------------------------------------------------
 
-    def get_symbols(self, macho_id: int) -> dict[int, int | None]:
+    def get_symbols(self, macho_id: int) -> dict[int, Optional[int]]:
         """ {offset: name_id} of the symbols a UUID has. """
         symbols = {}
         for offset, name_id in self.connection.execute(
@@ -200,7 +237,7 @@ class SymbolsDao:
             symbols[offset] = name_id
         return symbols
 
-    def add_symbols(self, rows: list[tuple[int, int, int, int | None]]) -> None:
+    def add_symbols(self, rows: list[tuple[int, int, int, Optional[int]]]) -> None:
         """ Add (macho_id, offset, size, name_id) rows. """
         for rows_chunk in chunks(rows, ROWS_PER_INSERT):
             self.connection.executemany('INSERT INTO symbol (macho_id, "offset", size, name_id) VALUES (?, ?, ?, ?)',
@@ -210,7 +247,7 @@ class SymbolsDao:
         """ Set the names of symbols, from (name_id, macho_id, offset) rows. """
         self.connection.executemany('UPDATE symbol SET name_id = ? WHERE macho_id = ? AND "offset" = ?', rows)
 
-    def find_symbol(self, macho_id: int, offset: int) -> SymbolMatch | None:
+    def find_symbol(self, macho_id: int, offset: int) -> Optional[SymbolMatch]:
         """ The function of the UUID covering the offset. If several do, the one starting closest to it. """
         row = self.connection.execute(
             'SELECT symbol."offset", name.text FROM symbol LEFT OUTER JOIN name ON symbol.name_id = name.id '
@@ -296,3 +333,12 @@ def name_hash(text: str) -> int:
 def chunks(items: list, size: int) -> Iterator[list]:
     for i in range(0, len(items), size):
         yield items[i:i + size]
+
+
+def get_schema_statements(connection: sqlite3.Connection) -> list[str]:
+    """ The CREATE statements of the database's tables and indexes, without whitespace. """
+    statements = []
+    for (sql,) in connection.execute("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name"):
+        # SQLite keeps each statement as it was written: the same table can be written spaced differently
+        statements.append(WHITESPACE.sub("", sql))
+    return statements

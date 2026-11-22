@@ -1,6 +1,7 @@
 import dataclasses
 import re
 from dataclasses import dataclass, field
+from typing import Optional, Union
 
 from symbolicator_server.ips_report import BinaryImage, Frame, IpsReport, PanicFrame
 from symbolicator_server.models import HIGH_BIT, Image
@@ -22,7 +23,7 @@ class ReportImage:
     source: str
     copies: list[Image] = field(default_factory=list)  # the stored images with this UUID
     kexts: list[Image] = field(default_factory=list)   # for a fileset kernelcache: its kexts' images
-    shared_region_start: int | None = None             # for a shared cache
+    shared_region_start: Optional[int] = None          # for a shared cache
     missing: bool = False
 
     @classmethod
@@ -33,7 +34,7 @@ class ReportImage:
     def is_kernel(self) -> bool:
         return self.source in KERNEL_SOURCES
 
-    def address_of(self, offset: int) -> int | None:
+    def address_of(self, offset: int) -> Optional[int]:
         """ The address of an offset into this image, or None if the database cannot place it. """
         if self.source == ABSOLUTE_SOURCE:
             return offset
@@ -163,7 +164,7 @@ class Symbolicator:
         self._add_symbol(frame, copy, address, lookup_address)
         return frame
 
-    def _find_copy(self, image: ReportImage, address: int) -> Image | None:
+    def _find_copy(self, image: ReportImage, address: int) -> Optional[Image]:
         """ The stored copy of the image to look the address up in. """
         if image.source == SHARED_CACHE_SOURCE:
             return self.dao.find_dylib_in_cache(image.uuid, address)
@@ -208,7 +209,7 @@ class Symbolicator:
             self._add_symbol(frame, copy, address, lookup_address)
         return backtrace
 
-    def _add_symbol(self, frame: Frame | PanicFrame, copy: Image, address: int, lookup_address: int) -> None:
+    def _add_symbol(self, frame: Union[Frame, PanicFrame], copy: Image, address: int, lookup_address: int) -> None:
         """ Fill in the frame's symbol and offset from the given image copy. """
         if copy.offset_base is None:
             return  # this copy could not be lined up with its UUID's symbols
@@ -225,7 +226,7 @@ class Symbolicator:
         frame.offset = address - start
 
 
-def find_image_containing(images: list[Image], address: int) -> Image | None:
+def find_image_containing(images: list[Image], address: int) -> Optional[Image]:
     """ The first image whose __TEXT contains address. """
     for image in images:
         if image.contains(address):

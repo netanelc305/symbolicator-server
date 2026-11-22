@@ -5,7 +5,7 @@ symbolicates `.ips` reports (panics, stackshots, crashes) against it, for any de
 
 ## Requirements
 
-- Python 3.14
+- Python 3.9 - 3.14
 - On the machine that runs the server:
   - [`ipsw`](https://github.com/blacktop/ipsw), which extracts the symbols from IPSWs:
 

@@ -2,14 +2,17 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Optional
 
 import typer
 
+from symbolicator_server._version import __version__
 from symbolicator_server.client import DEFAULT_SERVER, SymbolicatorClient
 from symbolicator_server.console import ScanProgress, setup_cli_logging
-from symbolicator_server.exceptions import IpswNotInstalledError, NotAnIpswError, ServerError, ServerUnreachableError
+from symbolicator_server.exceptions import DatabaseVersionError, IncompatibleServerError, IpswNotInstalledError, \
+    NotAnIpswError, ServerError, ServerUnreachableError
 from symbolicator_server.ips_report import IpsReport
+from symbolicator_server.models import API_VERSION
 from symbolicator_server.symbols_dao import SymbolsDao
 
 setup_cli_logging()
@@ -53,8 +56,9 @@ def cli_scan(
     if ipsw_path.suffix.lower() != ".ipsw":
         raise NotAnIpswError(ipsw_path)
 
+    client = SymbolicatorClient.connect(server)
     with ScanProgress.start() as status:
-        SymbolicatorClient(server).scan(ipsw_path, force, status)
+        client.scan(ipsw_path, force, status)
 
 
 @app.command("symbolicate")
@@ -62,13 +66,13 @@ def cli_symbolicate(
         report_path: Annotated[Path, typer.Argument(exists=True, dir_okay=False, metavar="REPORT",
                                                     help=".ips report")],
         server: Server = DEFAULT_SERVER,
-        proc: Annotated[str | None, typer.Option("--proc", "-p", help="Only this process (its name)")] = None,
+        proc: Annotated[Optional[str], typer.Option("--proc", "-p", help="Only this process (its name)")] = None,
         all_procs: Annotated[bool, typer.Option("--all", "-a",
                                                 help="Every process, not only the panicked one")] = False,
         as_json: Annotated[bool, typer.Option("--json", help="Print the server's JSON")] = False,
 ) -> None:
     """ Symbolicate a report and print it. """
-    report = SymbolicatorClient(server).symbolicate(report_path)
+    report = SymbolicatorClient.connect(server).symbolicate(report_path)
     if as_json:
         json.dump(report, sys.stdout, indent=2)
         return
@@ -84,10 +88,19 @@ def cli_stats(
         verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Also list the loaded IPSWs")] = False,
 ) -> None:
     """ Show what the server's database holds. """
-    stats = SymbolicatorClient(server).stats()
+    stats = SymbolicatorClient.connect(server).stats()
     if not verbose:
         stats = stats.without_ipsws()
     typer.echo(stats)
+
+
+@app.command("version")
+def cli_version(server: Server = DEFAULT_SERVER) -> None:
+    """ Show this client's versions and the server's. """
+    typer.echo(f"client  {__version__}  api {API_VERSION}")
+    # not connect(): this is where a server of another API version is looked into
+    server_version = SymbolicatorClient(server).version()
+    typer.echo(f"server  {server_version.version}  api {server_version.api}  schema {server_version.schema}")
 
 
 def main() -> None:
@@ -98,8 +111,20 @@ def main() -> None:
                      "Install it: brew install blacktop/tap/ipsw (https://github.com/blacktop/ipsw)")
     except NotAnIpswError as e:
         logger.error(f"{e.path.name} is not an .ipsw")
+    except DatabaseVersionError as e:
+        if e.found < e.expected:
+            logger.error(f"{e.path} has schema version {e.found}, this server needs {e.expected}. "
+                         f"Start over with --override-db and scan the IPSWs again")
+        else:
+            logger.error(f"{e.path} has schema version {e.found}, made by a newer server. Upgrade symbolicator-server")
     except ServerUnreachableError as e:
         logger.error(f"cannot reach {e.server}: {e.reason}")
+    except IncompatibleServerError as e:
+        if e.server_api is None:
+            logger.error(f"{e.server} is older than API versions. Install the same symbolicator-server on both sides")
+        else:
+            logger.error(f"{e.server} speaks API version {e.server_api}, this client speaks {e.client_api}. "
+                         f"Install the same symbolicator-server on both sides")
     except ServerError as e:
         if e.status_code is None:
             logger.error(e.message)

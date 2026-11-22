@@ -4,11 +4,11 @@ import urllib.parse
 import urllib.request
 from http.client import HTTPResponse
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, Optional, Union
 
 from symbolicator_server.console import ScanProgress
-from symbolicator_server.exceptions import ServerError, ServerUnreachableError
-from symbolicator_server.models import DatabaseStats
+from symbolicator_server.exceptions import IncompatibleServerError, ServerError, ServerUnreachableError
+from symbolicator_server.models import API_VERSION, DatabaseStats, ServerVersion
 
 DEFAULT_SERVER = "http://localhost:3993"
 
@@ -34,6 +34,27 @@ class SymbolicatorClient:
 
     def __init__(self, server: str = DEFAULT_SERVER):
         self.server = server.rstrip("/")
+
+    @classmethod
+    def connect(cls, server: str = DEFAULT_SERVER) -> "SymbolicatorClient":
+        """ A client for the server, once it is known to speak this client's API version. """
+        client = cls(server)
+        server_version = client.version()
+        if server_version.api != API_VERSION:
+            raise IncompatibleServerError(client.server, server_version.api, API_VERSION)
+        return client
+
+    def version(self) -> ServerVersion:
+        """ The server's package, API and database schema versions. """
+        try:
+            response = self._open(urllib.request.Request(f"{self.server}/version"))
+        except ServerError as e:
+            if e.status_code == 404:
+                # servers from before API versions have no /version
+                raise IncompatibleServerError(self.server, None, API_VERSION) from None
+            raise e
+        with response:
+            return ServerVersion.from_dict(json.load(response))
 
     def scan(self, ipsw_path: Path, force: bool, status: ScanProgress) -> dict[str, int]:
         """ Send the IPSW to the server, then follow its stages; returns how many records it loaded. """
@@ -68,7 +89,7 @@ class SymbolicatorClient:
         with self._open(urllib.request.Request(f"{self.server}/stats")) as response:
             return DatabaseStats.from_dict(json.load(response))
 
-    def _post(self, path: str, body: bytes | UploadProgress, size: int | None = None) -> HTTPResponse:
+    def _post(self, path: str, body: Union[bytes, UploadProgress], size: Optional[int] = None) -> HTTPResponse:
         headers = {}
         if size is not None:
             headers["Content-Length"] = str(size)  # urllib cannot tell a file's size by itself
