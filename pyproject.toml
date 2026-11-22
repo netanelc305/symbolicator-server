@@ -21,7 +21,7 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: 3 :: Only",
 ]
-dynamic = ["dependencies", "version"]
+dynamic = ["dependencies", "optional-dependencies", "version"]
 
 [project.urls]
 "Homepage" = "https://github.com/netanelc305/symbolicator-server"
@@ -38,6 +38,7 @@ symbolicator_server = ["schema.sql"]
 
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
+optional-dependencies.server = { file = ["requirements-server.txt"] }
 version = { attr = "symbolicator_server._version.__version__" }
 
 [tool.setuptools_scm]

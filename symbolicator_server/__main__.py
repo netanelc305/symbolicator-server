@@ -10,7 +10,7 @@ from symbolicator_server._version import __version__
 from symbolicator_server.client import DEFAULT_SERVER, SymbolicatorClient
 from symbolicator_server.console import ScanProgress, setup_cli_logging
 from symbolicator_server.exceptions import DatabaseVersionError, IncompatibleServerError, IpswNotInstalledError, \
-    NotAnIpswError, ServerError, ServerUnreachableError
+    NotAnIpswError, ServerError, ServerNotInstalledError, ServerUnreachableError
 from symbolicator_server.ips_report import IpsReport
 from symbolicator_server.models import API_VERSION
 from symbolicator_server.symbols_dao import SymbolsDao
@@ -36,13 +36,18 @@ def cli_serve(
         verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Log every name a scan adds or keeps")] = False,
 ) -> None:
     """ Run the server, on the database DB (created if it does not exist). """
+    try:
+        # the server's dependencies come with the "server" extra only
+        from symbolicator_server.server import serve
+    except ImportError:
+        raise ServerNotInstalledError()
+
     if override_db:
         for path in SymbolsDao.delete_files(database_path):
             logger.info(f"Deleted {path}")
     if not database_path.exists():
         logger.info(f"Creating {database_path}")
 
-    from symbolicator_server.server import serve  # fastapi and uvicorn are only needed here
     serve(database_path, signatures.resolve(), host, port, verbose)
 
 
@@ -109,6 +114,8 @@ def main() -> None:
     except IpswNotInstalledError:
         logger.error("ipsw is not installed, and the server scans IPSWs with it. "
                      "Install it: brew install blacktop/tap/ipsw (https://github.com/blacktop/ipsw)")
+    except ServerNotInstalledError:
+        logger.error('The server is not installed. Install it: python3 -m pip install -U "symbolicator-server[server]"')
     except NotAnIpswError as e:
         logger.error(f"{e.path.name} is not an .ipsw")
     except DatabaseVersionError as e:

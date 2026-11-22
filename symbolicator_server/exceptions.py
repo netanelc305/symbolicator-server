@@ -44,6 +44,10 @@ class IpswNotInstalledError(SymbolicatorException):
     """ Raised when the ipsw tool is not on the system. """
 
 
+class ServerNotInstalledError(SymbolicatorException):
+    """ Raised when serving without the server extra installed. """
+
+
 class NotAnIpswError(SymbolicatorException):
     """ Raised when the file to scan is not an .ipsw. """
     def __init__(self, path: Path):

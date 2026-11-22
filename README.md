@@ -32,6 +32,13 @@ or
 uv tool install symbolicator-server
 ```
 
+This installs the client only (`scan`, `symbolicate`, `stats`, `version`). On the machine that runs the
+server, install the `server` extra:
+
+```shell
+python3 -m pip install -U "symbolicator-server[server]"
+```
+
 ## Usage
 
 ### Run the server
