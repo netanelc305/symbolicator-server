@@ -34,7 +34,7 @@ symbolicator = "symbolicator_server.__main__:main"
 exclude = ["docs*", "tests*"]
 
 [tool.setuptools.package-data]
-symbolicator_server = ["schema.sql"]
+symbolicator_server = ["schema.sql", "py.typed"]
 
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
