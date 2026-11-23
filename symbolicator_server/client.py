@@ -8,7 +8,7 @@ from typing import BinaryIO, Optional, Union
 
 from symbolicator_server.console import ScanProgress
 from symbolicator_server.exceptions import IncompatibleServerError, ServerError, ServerUnreachableError
-from symbolicator_server.models import API_VERSION, DatabaseStats, ServerVersion
+from symbolicator_server.models import API_VERSION, DatabaseStats, FunctionSymbol, ImageInfo, ServerVersion, SharedCache
 
 DEFAULT_SERVER = "http://localhost:3993"
 
@@ -88,6 +88,45 @@ class SymbolicatorClient:
         """ What the server's database holds. """
         with self._open(urllib.request.Request(f"{self.server}/stats")) as response:
             return DatabaseStats.from_dict(json.load(response))
+
+    def find_dscs(self, device: str, build: str) -> list[SharedCache]:
+        """ The shared caches of a device's build (none if the server has no IPSW of it). """
+        query = urllib.parse.urlencode({"device": device, "build": build})
+        return [SharedCache.from_dict(dsc) for dsc in self._get_json(f"/dsc?{query}")]
+
+    def dsc_images(self, uuid: str) -> Optional[list[ImageInfo]]:
+        """ The images of a shared cache; None if the server does not have it. """
+        images = self._get_json(f"/dsc/{urllib.parse.quote(uuid)}/images")
+        return None if images is None else [ImageInfo.from_dict(image) for image in images]
+
+    def kernelcache_images(self, uuid: str) -> Optional[list[ImageInfo]]:
+        """ The kexts of a kernelcache, the kernel among them; None if the server does not have it. """
+        images = self._get_json(f"/kernelcache/{urllib.parse.quote(uuid)}/images")
+        return None if images is None else [ImageInfo.from_dict(image) for image in images]
+
+    def image_symbols(self, uuid: str, dsc: Optional[str] = None,
+                      kernelcache: Optional[str] = None) -> Optional[list[FunctionSymbol]]:
+        """
+        The functions of an image, at the addresses of its copy in the given shared cache or kernelcache;
+        None if the server has no such copy. Kernel addresses go without bit 63.
+        """
+        query = {key: value for key, value in (("dsc", dsc), ("kernelcache", kernelcache)) if value is not None}
+        path = f"/images/{urllib.parse.quote(uuid)}/symbols"
+        if query:
+            path += f"?{urllib.parse.urlencode(query)}"
+        symbols = self._get_json(path)
+        return None if symbols is None else [FunctionSymbol(*symbol) for symbol in symbols]
+
+    def _get_json(self, path: str):
+        """ The JSON a GET answers; None on a 404. """
+        try:
+            response = self._open(urllib.request.Request(f"{self.server}{path}"))
+        except ServerError as e:
+            if e.status_code == 404:
+                return None
+            raise e
+        with response:
+            return json.load(response)
 
     def _post(self, path: str, body: Union[bytes, UploadProgress], size: Optional[int] = None) -> HTTPResponse:
         headers = {}

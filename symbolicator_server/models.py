@@ -6,7 +6,7 @@ from typer import style
 
 # Kernel addresses have bit 63 set; the scanner stores them with it cleared, but its func_ names keep it.
 HIGH_BIT = 1 << 63
-API_VERSION = 1  # Bump on every API change
+API_VERSION = 2  # Bump on every API change
 
 
 @dataclass
@@ -110,6 +110,37 @@ class ServerVersion:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ServerVersion":
         return cls(data["version"], data["api"], data["schema"])
+
+
+@dataclass
+class SharedCache:
+    """ A stored dyld_shared_cache: its UUID and the address it is mapped at. """
+    uuid: str
+    shared_region_start: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SharedCache":
+        return cls(data["uuid"], data["shared_region_start"])
+
+
+@dataclass
+class ImageInfo:
+    """ One copy of a binary and its __TEXT. Kernel addresses go without bit 63, as stored. """
+    uuid: str
+    path: str
+    text_start: int
+    text_end: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ImageInfo":
+        return cls(data["uuid"], data["path"], data["text_start"], data["text_end"])
+
+
+class FunctionSymbol(NamedTuple):
+    """ A function of an image copy, at its addresses in that copy. name is None for an unnamed function. """
+    start: int
+    end: int
+    name: Optional[str]
 
 
 @dataclass
