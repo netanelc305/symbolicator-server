@@ -1,6 +1,7 @@
 import dataclasses
 import logging
 from pathlib import Path
+from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -79,6 +80,51 @@ def get_stats(request: Request):
     """ Database size, rows per table, and the loaded IPSWs. """
     with SymbolsDao.open(request.app.state.database_path) as dao:
         return dataclasses.asdict(dao.stats())
+
+
+# ---------------------------------------------------------------------------
+# Symbol lookup. UUIDs match in any case. Kernel addresses go without bit 63, as stored.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/dsc")
+def get_dscs(request: Request, device: str, build: str):
+    """ The shared caches of a device's build: [{uuid, shared_region_start}]. """
+    with SymbolsDao.open(request.app.state.database_path) as dao:
+        return [dataclasses.asdict(dsc) for dsc in dao.find_dscs(device, build)]
+
+
+@app.get("/dsc/{uuid}/images")
+def get_dsc_images(request: Request, uuid: str):
+    """ The images of a shared cache: [{uuid, path, text_start, text_end}]. """
+    with SymbolsDao.open(request.app.state.database_path) as dao:
+        if dao.get_shared_region_start(uuid.upper()) is None:
+            return error_response(404, f"shared cache {uuid} not found")
+        return [dataclasses.asdict(image) for image in dao.get_dsc_images(uuid.upper())]
+
+
+@app.get("/kernelcache/{uuid}/images")
+def get_kernelcache_images(request: Request, uuid: str):
+    """ The kexts of a kernelcache, the kernel among them: [{uuid, path, text_start, text_end}]. """
+    with SymbolsDao.open(request.app.state.database_path) as dao:
+        if dao.get_macho_id(uuid.upper()) is None:
+            return error_response(404, f"kernelcache {uuid} not found")
+        return [dataclasses.asdict(image) for image in dao.get_kernelcache_images(uuid.upper())]
+
+
+@app.get("/images/{uuid}/symbols")
+def get_image_symbols(request: Request, uuid: str, dsc: Optional[str] = None, kernelcache: Optional[str] = None):
+    """
+    The functions of an image: [[start, end, name or null]], at the addresses of its copy in the given
+    shared cache or kernelcache (without either, of a copy which has symbols).
+    """
+    with SymbolsDao.open(request.app.state.database_path) as dao:
+        copy = dao.find_image_copy(uuid.upper(), dsc.upper() if dsc else None,
+                                   kernelcache.upper() if kernelcache else None)
+        if copy is None:
+            return error_response(404, f"image {uuid} not found")
+        # JSONResponse directly: FastAPI's own encoding walks every one of an image's ~100,000s functions
+        return JSONResponse([list(symbol) for symbol in dao.get_function_symbols(copy)])
 
 
 def serve(database_path: Path, signatures: Path, host: str, port: int, verbose: bool = False) -> None:

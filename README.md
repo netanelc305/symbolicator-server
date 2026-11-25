@@ -98,5 +98,23 @@ symbolicator stats        # size and rows per table
 symbolicator stats -v     # and the loaded IPSWs
 ```
 
+### Symbol lookup API
+
+| Route | Answers | Client method |
+|---|---|---|
+| `GET /dsc?device=iPhone17,3&build=23E246` | The shared caches of a build: `[{uuid, shared_region_start}]` (empty if none) | `find_dscs` |
+| `GET /dsc/{uuid}/images` | The images of a shared cache: `[{uuid, path, text_start, text_end}]` | `dsc_images` |
+| `GET /kernelcache/{uuid}/images` | The kexts of a kernelcache, the kernel among them: `[{uuid, path, text_start, text_end}]` | `kernelcache_images` |
+| `GET /images/{uuid}/symbols?dsc=UUID` or `?kernelcache=UUID` | The functions of an image: `[[start, end, name or null]]`, at the addresses of its copy in that cache (without either, of a copy that has symbols) | `image_symbols` |
+
+```python
+from symbolicator_server.client import SymbolicatorClient
+
+client = SymbolicatorClient.connect("http://localhost:3993")
+cache = client.find_dscs("iPhone17,3", "23E246")[0]
+images = client.dsc_images(cache.uuid)
+functions = client.image_symbols(images[0].uuid, dsc=cache.uuid)
+```
+
 The client commands talk to `http://localhost:3993` by default; set `-s URL` or `SYMBOLICATOR_SERVER` for
 another server.

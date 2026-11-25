@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Optional
 
 from symbolicator_server.exceptions import DatabaseVersionError
-from symbolicator_server.models import DatabaseStats, Image, ImageRecord, Ipsw, IpswStats, SymbolMatch
+from symbolicator_server.models import DatabaseStats, FunctionSymbol, Image, ImageInfo, ImageRecord, Ipsw, IpswStats, \
+    SharedCache, SymbolMatch
 
 SCHEMA = Path(__file__).parent / "schema.sql"
 SCHEMA_VERSION = 1  # Bump on every schema change
@@ -215,6 +216,58 @@ class SymbolsDao:
             (kernelcache_uuid,)).fetchall()
         return [Image.from_row(row) for row in rows]
 
+    def find_dscs(self, device: str, build: str) -> list[SharedCache]:
+        """ The shared caches of the IPSWs of this build that list this device. """
+        rows = self.connection.execute(
+            "SELECT DISTINCT dsc.uuid, dsc.shared_region_start FROM dsc JOIN ipsw ON dsc.ipsw_id = ipsw.id "
+            "WHERE ipsw.build = ? AND EXISTS (SELECT 1 FROM json_each(ipsw.devices) WHERE json_each.value = ?) "
+            "ORDER BY dsc.uuid",
+            (build, device)).fetchall()
+        return [SharedCache(*row) for row in rows]
+
+    def get_dsc_images(self, dsc_uuid: str) -> list[ImageInfo]:
+        """ The images of a shared cache, by address. """
+        rows = self.connection.execute(
+            "SELECT DISTINCT macho.uuid, image.path, image.text_start, image.text_start + image.text_size "
+            "FROM image JOIN macho ON image.macho_id = macho.id WHERE image.dsc_uuid = ? ORDER BY image.text_start",
+            (dsc_uuid,)).fetchall()
+        return [ImageInfo(*row) for row in rows]
+
+    def get_kernelcache_images(self, kernelcache_uuid: str) -> list[ImageInfo]:
+        """ The kext images of a fileset kernelcache (the kernel itself among them), by address. """
+        rows = self.connection.execute(
+            "SELECT DISTINCT kext.uuid, image.path, image.text_start, image.text_start + image.text_size "
+            "FROM image JOIN macho AS kext ON image.macho_id = kext.id "
+            "JOIN kernelcache_kext ON kernelcache_kext.image_id = image.id "
+            "JOIN macho AS kernelcache ON kernelcache_kext.kernelcache_id = kernelcache.id "
+            "WHERE kernelcache.uuid = ? ORDER BY image.text_start",
+            (kernelcache_uuid,)).fetchall()
+        return [ImageInfo(*row) for row in rows]
+
+    def find_image_copy(self, uuid: str, dsc_uuid: Optional[str] = None,
+                        kernelcache_uuid: Optional[str] = None) -> Optional[Image]:
+        """
+        The copy of the UUID in the given shared cache or kernelcache; without either, a copy which has symbols.
+        """
+        if dsc_uuid is not None:
+            where = "macho.uuid = ? AND image.dsc_uuid = ?"
+            params: tuple = (uuid, dsc_uuid)
+        elif kernelcache_uuid is not None:
+            where = ("macho.uuid = ? AND image.id IN (SELECT kernelcache_kext.image_id FROM kernelcache_kext "
+                     "JOIN macho AS kernelcache ON kernelcache_kext.kernelcache_id = kernelcache.id "
+                     "WHERE kernelcache.uuid = ?)")
+            params = (uuid, kernelcache_uuid)
+        else:
+            where = "macho.uuid = ?"
+            params = (uuid,)
+        row = self.connection.execute(
+            f"SELECT {IMAGE_COLUMNS} FROM image JOIN macho ON image.macho_id = macho.id WHERE {where} "
+            f"ORDER BY image.offset_base IS NULL, image.id LIMIT 1",
+            params).fetchone()
+        if row is None:
+            return None
+        return Image.from_row(row)
+
     def find_dylib_in_cache(self, dsc_uuid: str, address: int) -> Optional[Image]:
         """ The dylib of the given shared cache whose __TEXT contains address. """
         row = self.connection.execute(
@@ -257,6 +310,22 @@ class SymbolsDao:
         if row is None:
             return None
         return SymbolMatch(*row)
+
+    def get_function_symbols(self, copy: Image) -> list[FunctionSymbol]:
+        """
+        All functions of this image, sorted by address.
+
+        The DB stores functions as offsets, shared by every copy of the same binary. They are returned
+        as absolute addresses in this copy (offset_base + offset).
+        """
+        if copy.offset_base is None:
+            return []  # this copy could not be lined up with its UUID's symbols
+        rows = self.connection.execute(
+            'SELECT symbol."offset", symbol.size, name.text FROM symbol '
+            'LEFT OUTER JOIN name ON symbol.name_id = name.id WHERE symbol.macho_id = ? ORDER BY symbol."offset"',
+            (copy.macho_id,))
+        return [FunctionSymbol(copy.offset_base + offset, copy.offset_base + offset + size, name)
+                for offset, size, name in rows]
 
     def get_name_text(self, name_id: int) -> str:
         return self.connection.execute("SELECT text FROM name WHERE id = ?", (name_id,)).fetchone()[0]
