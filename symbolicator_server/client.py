@@ -131,6 +131,23 @@ class SymbolicatorClient:
         symbols = self._get_json(path)
         return None if symbols is None else [FunctionSymbol(*symbol) for symbol in symbols]
 
+    def find_functions(self, images: dict[str, list[int]], dsc: Optional[str] = None,
+                       kernelcache: Optional[str] = None) -> dict[str, list[Optional[FunctionSymbol]]]:
+        """
+        The function covering each of the given addresses, by the UUID of the image they are in and in the
+        order given; None for an address no function covers. The addresses are those of the copy of each
+        image in the given shared cache or kernelcache, as image_symbols() gives them. An image the server
+        has no such copy of is left out.
+        """
+        self._require("/functions", "1.0")
+        query = {key: value for key, value in (("images", images), ("dsc", dsc), ("kernelcache", kernelcache))
+                 if value is not None}
+        request = urllib.request.Request(f"{self.server}/functions", data=json.dumps(query).encode(), method="POST",
+                                         headers={"Content-Type": "application/json"})
+        with self._open(request) as response:
+            return {uuid: [None if function is None else FunctionSymbol(*function) for function in functions]
+                    for uuid, functions in json.load(response).items()}
+
     def _require(self, route: str, version: str) -> None:
         """
         Raise unless the server speaks the given version of the route, the one its caller is written for:

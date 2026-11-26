@@ -339,6 +339,26 @@ class SymbolsDao:
         return [FunctionSymbol(copy.offset_base + offset, copy.offset_base + offset + size, name)
                 for offset, size, name in rows]
 
+    def find_function(self, copy: Image, address: int) -> Optional[FunctionSymbol]:
+        """
+        The function of this image covering the address, at the addresses of this copy: the one a search of
+        get_function_symbols() finds, without reading every function of the image for it.
+        """
+        if copy.offset_base is None:
+            return None  # this copy could not be lined up with its UUID's symbols
+        # the closest function starting at or before the address: one step in the table's own order
+        row = self.connection.execute(
+            'SELECT symbol."offset", symbol.size, name.text FROM symbol '
+            'LEFT OUTER JOIN name ON symbol.name_id = name.id '
+            'WHERE symbol.macho_id = ? AND symbol."offset" <= ? ORDER BY symbol."offset" DESC LIMIT 1',
+            (copy.macho_id, address - copy.offset_base)).fetchone()
+        if row is None:
+            return None
+        offset, size, name = row
+        if address >= copy.offset_base + offset + size:
+            return None
+        return FunctionSymbol(copy.offset_base + offset, copy.offset_base + offset + size, name)
+
     def get_name_text(self, name_id: int) -> str:
         return self.connection.execute("SELECT text FROM name WHERE id = ?", (name_id,)).fetchone()[0]
 

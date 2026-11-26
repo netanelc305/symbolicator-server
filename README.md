@@ -122,6 +122,7 @@ client. `symbolicator version` shows the routes of the server.
 | `GET /kernelcache?device=iPhone17,3&build=23E246` | The kernelcaches of a build: `[{uuid, path, kernel_version}]` (empty if none), for a report which does not tell its kernelcache. An IPSW holds several; the one a device runs holds the kernel images of the report | `find_kernelcaches` |
 | `GET /kernelcache/{uuid}/images` | The kexts of a kernelcache, the kernel among them: `[{uuid, path, text_start, text_end}]` | `kernelcache_images` |
 | `GET /images/{uuid}/symbols?dsc=UUID` or `?kernelcache=UUID` | The functions of an image: `[[start, end, name or null]]`, at the addresses of its copy in that cache (without either, of a copy that has symbols) | `image_symbols` |
+| `POST /functions` with `{"images": {uuid: [address]}, "dsc": UUID}` or `"kernelcache": UUID` | The function covering each address: `{uuid: [[start, end, name or null] or null]}` in the order asked, at the addresses of that cache. For naming the frames of a report in one request | `find_functions` |
 
 ```python
 from symbolicator_server.client import SymbolicatorClient
