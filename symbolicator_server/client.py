@@ -9,7 +9,7 @@ from typing import BinaryIO, Optional, Union
 
 from symbolicator_server.console import ScanProgress
 from symbolicator_server.exceptions import IncompatibleServerError, ServerError, ServerUnreachableError
-from symbolicator_server.models import DatabaseStats, FunctionSymbol, ImageInfo, ServerVersion, SharedCache
+from symbolicator_server.models import DatabaseStats, FunctionSymbol, ImageInfo, Kernelcache, ServerVersion, SharedCache
 
 DEFAULT_SERVER = "http://localhost:3993"
 
@@ -104,6 +104,12 @@ class SymbolicatorClient:
         self._require("/dsc/{uuid}/images", "1.0")
         images = self._get_json(f"/dsc/{urllib.parse.quote(uuid)}/images")
         return None if images is None else [ImageInfo.from_dict(image) for image in images]
+
+    def find_kernelcaches(self, device: str, build: str) -> list[Kernelcache]:
+        """ The kernelcaches of a device's build (none if the server has no IPSW of it). """
+        self._require("/kernelcache", "1.0")
+        query = urllib.parse.urlencode({"device": device, "build": build})
+        return [Kernelcache.from_dict(kernelcache) for kernelcache in self._get_json(f"/kernelcache?{query}")]
 
     def kernelcache_images(self, uuid: str) -> Optional[list[ImageInfo]]:
         """ The kexts of a kernelcache, the kernel among them; None if the server does not have it. """

@@ -127,6 +127,17 @@ def get_dsc_images(request: Request, uuid: str):
         return [dataclasses.asdict(image) for image in dao.get_dsc_images(uuid.upper())]
 
 
+@get("/kernelcache", "1.0")
+def get_kernelcaches(request: Request, device: str, build: str):
+    """
+    The kernelcaches of a device's build: [{uuid, path, kernel_version}]. For a report which does not tell
+    its kernelcache. An IPSW holds several (release and research, one per board): the one a device runs is
+    the one whose images hold the kernel images of the report.
+    """
+    with SymbolsDao.open(request.app.state.database_path) as dao:
+        return [dataclasses.asdict(kernelcache) for kernelcache in dao.find_kernelcaches(device, build)]
+
+
 @get("/kernelcache/{uuid}/images", "1.0")
 def get_kernelcache_images(request: Request, uuid: str):
     """ The kexts of a kernelcache, the kernel among them: [{uuid, path, text_start, text_end}]. """

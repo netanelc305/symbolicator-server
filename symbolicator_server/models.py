@@ -126,6 +126,18 @@ class SharedCache:
 
 
 @dataclass
+class Kernelcache:
+    """ A stored fileset kernelcache: its UUID, its file name in the IPSW and the kernel it holds. """
+    uuid: str
+    path: str
+    kernel_version: Optional[str]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Kernelcache":
+        return cls(data["uuid"], data["path"], data["kernel_version"])
+
+
+@dataclass
 class ImageInfo:
     """ One copy of a binary and its __TEXT. Kernel addresses go without bit 63, as stored. """
     uuid: str

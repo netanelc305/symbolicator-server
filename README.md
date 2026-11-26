@@ -119,6 +119,7 @@ client. `symbolicator version` shows the routes of the server.
 |---|---|---|
 | `GET /dsc?device=iPhone17,3&build=23E246` | The shared caches of a build: `[{uuid, shared_region_start}]` (empty if none) | `find_dscs` |
 | `GET /dsc/{uuid}/images` | The images of a shared cache: `[{uuid, path, text_start, text_end}]` | `dsc_images` |
+| `GET /kernelcache?device=iPhone17,3&build=23E246` | The kernelcaches of a build: `[{uuid, path, kernel_version}]` (empty if none), for a report which does not tell its kernelcache. An IPSW holds several; the one a device runs holds the kernel images of the report | `find_kernelcaches` |
 | `GET /kernelcache/{uuid}/images` | The kexts of a kernelcache, the kernel among them: `[{uuid, path, text_start, text_end}]` | `kernelcache_images` |
 | `GET /images/{uuid}/symbols?dsc=UUID` or `?kernelcache=UUID` | The functions of an image: `[[start, end, name or null]]`, at the addresses of its copy in that cache (without either, of a copy that has symbols) | `image_symbols` |
 
