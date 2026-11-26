@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.routing import APIRoute
+from pydantic import BaseModel
 from starlette.background import BackgroundTask
 from starlette.requests import ClientDisconnect
 
@@ -160,6 +161,33 @@ def get_image_symbols(request: Request, uuid: str, dsc: Optional[str] = None, ke
             return error_response(404, f"image {uuid} not found")
         # JSONResponse directly: FastAPI's own encoding walks every one of an image's ~100,000s functions
         return JSONResponse([list(symbol) for symbol in dao.get_function_symbols(copy)])
+
+
+class FunctionsQuery(BaseModel):
+    """ Addresses to find the functions of, by the UUID of the image each is in. """
+    images: dict[str, list[int]]
+    dsc: Optional[str] = None
+    kernelcache: Optional[str] = None
+
+
+@post("/functions", "1.0")
+def post_functions(request: Request, query: FunctionsQuery):
+    """
+    Body: {images: {uuid: [address]}, dsc or kernelcache: uuid}. Answers the function covering each address,
+    {uuid: [[start, end, name or null] or null]} in the order asked, at the addresses of the copy of each
+    image in that cache (without either, of a copy which has symbols). An image the server has no such
+    copy of is left out. For naming the frames of a report at once: /images/{uuid}/symbols answers every
+    function of an image, megabytes to name a few addresses.
+    """
+    dsc = query.dsc.upper() if query.dsc else None
+    kernelcache = query.kernelcache.upper() if query.kernelcache else None
+    functions = {}
+    with SymbolsDao.open(request.app.state.database_path) as dao:
+        for uuid, addresses in query.images.items():
+            copy = dao.find_image_copy(uuid.upper(), dsc, kernelcache)
+            if copy is not None:
+                functions[uuid] = [dao.find_function(copy, address) for address in addresses]
+    return JSONResponse(functions)
 
 
 def serve(database_path: Path, signatures: Path, host: str, port: int, verbose: bool = False) -> None:
