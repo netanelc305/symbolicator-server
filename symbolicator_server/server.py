@@ -7,6 +7,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.routing import APIRoute
 from starlette.background import BackgroundTask
 from starlette.requests import ClientDisconnect
 
@@ -20,9 +21,24 @@ from symbolicator_server.symbolicator import Symbolicator
 from symbolicator_server.symbols_dao import SCHEMA_VERSION, SymbolsDao
 
 NDJSON = "application/x-ndjson"
+ROUTE_VERSION = "x-version"
 
 logger = logging.getLogger(__name__)
 app = FastAPI(title="symbolicator")
+
+
+def get(path: str, version: str):
+    """
+    A GET route of the given MAJOR.MINOR version, which /capabilities tells. A change older clients cannot
+    take (a field or parameter removed, renamed or meaning something else) bumps the major, an addition bumps
+    the minor: a client calls a route only when the server speaks its major and its minor or a later one.
+    """
+    return app.get(path, openapi_extra={ROUTE_VERSION: version})
+
+
+def post(path: str, version: str):
+    """ A POST route of the given MAJOR.MINOR version, as get(). """
+    return app.post(path, openapi_extra={ROUTE_VERSION: version})
 
 
 def error_response(status_code: int, message: str) -> JSONResponse:
@@ -35,7 +51,7 @@ def symbolicate_report(database_path: Path, text: str) -> dict:
     return dataclasses.asdict(report)
 
 
-@app.post("/scan")
+@post("/scan", "1.0")
 async def post_scan(request: Request, name: str, force: bool = False):
     """ Body: an .ipsw. Answers one JSON line per stage, then {"done": counts} or {"error": ...}. """
     scanner = request.app.state.scanner
@@ -58,7 +74,7 @@ async def post_scan(request: Request, name: str, force: bool = False):
     return StreamingResponse(scan.stages(), media_type=NDJSON, background=BackgroundTask(scan.cleanup))
 
 
-@app.post("/symbolicate")
+@post("/symbolicate", "1.0")
 async def post_symbolicate(request: Request):
     """ Body: an .ips report. Answers the symbolicated report. """
     body = await request.body()
@@ -69,13 +85,21 @@ async def post_symbolicate(request: Request):
         return error_response(400, str(e))
 
 
-@app.get("/version")
+@get("/capabilities", "1.0")
+def get_capabilities(request: Request):
+    """ The version of each route: {route: "MAJOR.MINOR"}. Clients check the one of a route before they call it. """
+    # openapi_extra is unset on a route declared without get() or post(), which then fails here
+    return {route.path: route.openapi_extra[ROUTE_VERSION] for route in request.app.routes
+            if isinstance(route, APIRoute)}
+
+
+@get("/version", "1.0")
 def get_version():
-    """ The server's package, API and database schema versions. Clients check the API version first. """
+    """ The server's package and database schema versions, and the API version older clients check. """
     return dataclasses.asdict(ServerVersion(__version__, API_VERSION, SCHEMA_VERSION))
 
 
-@app.get("/stats")
+@get("/stats", "1.0")
 def get_stats(request: Request):
     """ Database size, rows per table, and the loaded IPSWs. """
     with SymbolsDao.open(request.app.state.database_path) as dao:
@@ -87,14 +111,14 @@ def get_stats(request: Request):
 # ---------------------------------------------------------------------------
 
 
-@app.get("/dsc")
+@get("/dsc", "1.0")
 def get_dscs(request: Request, device: str, build: str):
     """ The shared caches of a device's build: [{uuid, shared_region_start}]. """
     with SymbolsDao.open(request.app.state.database_path) as dao:
         return [dataclasses.asdict(dsc) for dsc in dao.find_dscs(device, build)]
 
 
-@app.get("/dsc/{uuid}/images")
+@get("/dsc/{uuid}/images", "1.0")
 def get_dsc_images(request: Request, uuid: str):
     """ The images of a shared cache: [{uuid, path, text_start, text_end}]. """
     with SymbolsDao.open(request.app.state.database_path) as dao:
@@ -103,7 +127,7 @@ def get_dsc_images(request: Request, uuid: str):
         return [dataclasses.asdict(image) for image in dao.get_dsc_images(uuid.upper())]
 
 
-@app.get("/kernelcache/{uuid}/images")
+@get("/kernelcache/{uuid}/images", "1.0")
 def get_kernelcache_images(request: Request, uuid: str):
     """ The kexts of a kernelcache, the kernel among them: [{uuid, path, text_start, text_end}]. """
     with SymbolsDao.open(request.app.state.database_path) as dao:
@@ -112,7 +136,7 @@ def get_kernelcache_images(request: Request, uuid: str):
         return [dataclasses.asdict(image) for image in dao.get_kernelcache_images(uuid.upper())]
 
 
-@app.get("/images/{uuid}/symbols")
+@get("/images/{uuid}/symbols", "1.0")
 def get_image_symbols(request: Request, uuid: str, dsc: Optional[str] = None, kernelcache: Optional[str] = None):
     """
     The functions of an image: [[start, end, name or null]], at the addresses of its copy in the given

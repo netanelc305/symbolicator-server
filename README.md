@@ -98,6 +98,21 @@ symbolicator stats        # size and rows per table
 symbolicator stats -v     # and the loaded IPSWs
 ```
 
+### Route versions
+
+`GET /capabilities` tells the `MAJOR.MINOR` version of each route the server speaks:
+
+```json
+{"/capabilities": "1.0", "/version": "1.0", "/scan": "1.0", "/symbolicate": "1.0", "/stats": "1.0", "/dsc": "1.0"}
+```
+
+The version of a route is given where the server declares it, `@get("/dsc", "1.0")` in
+`symbolicator_server/server.py`: a change which older clients cannot take bumps its major, an addition to it
+bumps its minor. Each client method names the version it is written for, `self._require("/dsc", "1.0")`, and
+calls its route only when the server speaks the same major and that minor or a later one. So a client and a
+server of different releases work together on the routes they share, and an addition to a route cuts off no
+client. `symbolicator version` shows the routes of the server.
+
 ### Symbol lookup API
 
 | Route | Answers | Client method |

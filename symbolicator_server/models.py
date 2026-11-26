@@ -6,7 +6,9 @@ from typer import style
 
 # Kernel addresses have bit 63 set; the scanner stores them with it cleared, but its func_ names keep it.
 HIGH_BIT = 1 << 63
-API_VERSION = 2  # Bump on every API change
+# What clients from before /capabilities check, so it stays as it is. Routes have their own versions since,
+# next to each of them in server.py.
+API_VERSION = 2
 
 
 @dataclass
