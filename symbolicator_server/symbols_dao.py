@@ -8,7 +8,7 @@ from typing import Optional
 
 from symbolicator_server.exceptions import DatabaseVersionError
 from symbolicator_server.models import DatabaseStats, FunctionSymbol, Image, ImageInfo, ImageRecord, Ipsw, IpswStats, \
-    SharedCache, SymbolMatch
+    Kernelcache, SharedCache, SymbolMatch
 
 SCHEMA = Path(__file__).parent / "schema.sql"
 SCHEMA_VERSION = 1  # Bump on every schema change
@@ -224,6 +224,18 @@ class SymbolsDao:
             "ORDER BY dsc.uuid",
             (build, device)).fetchall()
         return [SharedCache(*row) for row in rows]
+
+    def find_kernelcaches(self, device: str, build: str) -> list[Kernelcache]:
+        """ The kernelcaches of the IPSWs of this build that list this device. """
+        rows = self.connection.execute(
+            "SELECT DISTINCT macho.uuid, image.path, image.kernel_version FROM image "
+            "JOIN macho ON image.macho_id = macho.id "
+            "JOIN ipsw_image ON ipsw_image.image_id = image.id JOIN ipsw ON ipsw_image.ipsw_id = ipsw.id "
+            "WHERE image.kind = 'kernel' AND ipsw.build = ? "
+            "AND EXISTS (SELECT 1 FROM json_each(ipsw.devices) WHERE json_each.value = ?) "
+            "ORDER BY image.path, macho.uuid",
+            (build, device)).fetchall()
+        return [Kernelcache(*row) for row in rows]
 
     def get_dsc_images(self, dsc_uuid: str) -> list[ImageInfo]:
         """ The images of a shared cache, by address. """

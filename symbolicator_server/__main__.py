@@ -12,7 +12,6 @@ from symbolicator_server.console import ScanProgress, setup_cli_logging
 from symbolicator_server.exceptions import DatabaseVersionError, IncompatibleServerError, IpswNotInstalledError, \
     NotAnIpswError, ServerError, ServerNotInstalledError, ServerUnreachableError
 from symbolicator_server.ips_report import IpsReport
-from symbolicator_server.models import API_VERSION
 from symbolicator_server.symbols_dao import SymbolsDao
 
 setup_cli_logging()
@@ -102,10 +101,12 @@ def cli_stats(
 @app.command("version")
 def cli_version(server: Server = DEFAULT_SERVER) -> None:
     """ Show this client's versions and the server's. """
-    typer.echo(f"client  {__version__}  api {API_VERSION}")
-    # not connect(): this is where a server of another API version is looked into
-    server_version = SymbolicatorClient(server).version()
-    typer.echo(f"server  {server_version.version}  api {server_version.api}  schema {server_version.schema}")
+    typer.echo(f"client  {__version__}")
+    client = SymbolicatorClient.connect(server)
+    server_version = client.version()
+    typer.echo(f"server  {server_version.version}  schema {server_version.schema}")
+    for route, version in sorted(client.capabilities.items()):
+        typer.echo(f"        {route}  {version}")
 
 
 def main() -> None:
@@ -128,10 +129,10 @@ def main() -> None:
         logger.error(f"cannot reach {e.server}: {e.reason}")
     except IncompatibleServerError as e:
         if e.server_api is None:
-            logger.error(f"{e.server} is older than API versions. Install the same symbolicator-server on both sides")
+            logger.error(f"{e.server} has no {e.route}. Install the same symbolicator-server on both sides")
         else:
-            logger.error(f"{e.server} speaks API version {e.server_api}, this client speaks {e.client_api}. "
-                         f"Install the same symbolicator-server on both sides")
+            logger.error(f"{e.server} speaks version {e.server_api} of {e.route}, this client needs "
+                         f"{e.client_api}. Install the same symbolicator-server on both sides")
     except ServerError as e:
         if e.status_code is None:
             logger.error(e.message)

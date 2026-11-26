@@ -98,12 +98,28 @@ symbolicator stats        # size and rows per table
 symbolicator stats -v     # and the loaded IPSWs
 ```
 
+### Route versions
+
+`GET /capabilities` tells the `MAJOR.MINOR` version of each route the server speaks:
+
+```json
+{"/capabilities": "1.0", "/version": "1.0", "/scan": "1.0", "/symbolicate": "1.0", "/stats": "1.0", "/dsc": "1.0"}
+```
+
+The version of a route is given where the server declares it, `@get("/dsc", "1.0")` in
+`symbolicator_server/server.py`: a change which older clients cannot take bumps its major, an addition to it
+bumps its minor. Each client method names the version it is written for, `self._require("/dsc", "1.0")`, and
+calls its route only when the server speaks the same major and that minor or a later one. So a client and a
+server of different releases work together on the routes they share, and an addition to a route cuts off no
+client. `symbolicator version` shows the routes of the server.
+
 ### Symbol lookup API
 
 | Route | Answers | Client method |
 |---|---|---|
 | `GET /dsc?device=iPhone17,3&build=23E246` | The shared caches of a build: `[{uuid, shared_region_start}]` (empty if none) | `find_dscs` |
 | `GET /dsc/{uuid}/images` | The images of a shared cache: `[{uuid, path, text_start, text_end}]` | `dsc_images` |
+| `GET /kernelcache?device=iPhone17,3&build=23E246` | The kernelcaches of a build: `[{uuid, path, kernel_version}]` (empty if none), for a report which does not tell its kernelcache. An IPSW holds several; the one a device runs holds the kernel images of the report | `find_kernelcaches` |
 | `GET /kernelcache/{uuid}/images` | The kexts of a kernelcache, the kernel among them: `[{uuid, path, text_start, text_end}]` | `kernelcache_images` |
 | `GET /images/{uuid}/symbols?dsc=UUID` or `?kernelcache=UUID` | The functions of an image: `[[start, end, name or null]]`, at the addresses of its copy in that cache (without either, of a copy that has symbols) | `image_symbols` |
 

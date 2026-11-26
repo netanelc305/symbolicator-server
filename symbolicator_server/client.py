@@ -2,13 +2,14 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
+from functools import cached_property
 from http.client import HTTPResponse
 from pathlib import Path
 from typing import BinaryIO, Optional, Union
 
 from symbolicator_server.console import ScanProgress
 from symbolicator_server.exceptions import IncompatibleServerError, ServerError, ServerUnreachableError
-from symbolicator_server.models import API_VERSION, DatabaseStats, FunctionSymbol, ImageInfo, ServerVersion, SharedCache
+from symbolicator_server.models import DatabaseStats, FunctionSymbol, ImageInfo, Kernelcache, ServerVersion, SharedCache
 
 DEFAULT_SERVER = "http://localhost:3993"
 
@@ -37,27 +38,28 @@ class SymbolicatorClient:
 
     @classmethod
     def connect(cls, server: str = DEFAULT_SERVER) -> "SymbolicatorClient":
-        """ A client for the server, once it is known to speak this client's API version. """
+        """ A client for the server, once it is known to be there and to tell its capabilities. """
         client = cls(server)
-        server_version = client.version()
-        if server_version.api != API_VERSION:
-            raise IncompatibleServerError(client.server, server_version.api, API_VERSION)
+        client.capabilities
         return client
+
+    @cached_property
+    def capabilities(self) -> dict[str, str]:
+        """ The MAJOR.MINOR version of each route the server speaks. """
+        capabilities = self._get_json("/capabilities")
+        if capabilities is None:
+            # servers from before capabilities
+            raise IncompatibleServerError(self.server, "/capabilities", None, "1.0")
+        return capabilities
 
     def version(self) -> ServerVersion:
         """ The server's package, API and database schema versions. """
-        try:
-            response = self._open(urllib.request.Request(f"{self.server}/version"))
-        except ServerError as e:
-            if e.status_code == 404:
-                # servers from before API versions have no /version
-                raise IncompatibleServerError(self.server, None, API_VERSION) from None
-            raise e
-        with response:
-            return ServerVersion.from_dict(json.load(response))
+        self._require("/version", "1.0")
+        return ServerVersion.from_dict(self._get_json("/version"))
 
     def scan(self, ipsw_path: Path, force: bool, status: ScanProgress) -> dict[str, int]:
         """ Send the IPSW to the server, then follow its stages; returns how many records it loaded. """
+        self._require("/scan", "1.0")
         query = {"name": ipsw_path.name}
         if force:
             query["force"] = "true"
@@ -81,26 +83,37 @@ class SymbolicatorClient:
 
     def symbolicate(self, report_path: Path) -> dict:
         """ The symbolicated report, as the server's JSON. """
+        self._require("/symbolicate", "1.0")
         with self._post("/symbolicate", report_path.read_bytes()) as response:
             return json.load(response)
 
     def stats(self) -> DatabaseStats:
         """ What the server's database holds. """
+        self._require("/stats", "1.0")
         with self._open(urllib.request.Request(f"{self.server}/stats")) as response:
             return DatabaseStats.from_dict(json.load(response))
 
     def find_dscs(self, device: str, build: str) -> list[SharedCache]:
         """ The shared caches of a device's build (none if the server has no IPSW of it). """
+        self._require("/dsc", "1.0")
         query = urllib.parse.urlencode({"device": device, "build": build})
         return [SharedCache.from_dict(dsc) for dsc in self._get_json(f"/dsc?{query}")]
 
     def dsc_images(self, uuid: str) -> Optional[list[ImageInfo]]:
         """ The images of a shared cache; None if the server does not have it. """
+        self._require("/dsc/{uuid}/images", "1.0")
         images = self._get_json(f"/dsc/{urllib.parse.quote(uuid)}/images")
         return None if images is None else [ImageInfo.from_dict(image) for image in images]
 
+    def find_kernelcaches(self, device: str, build: str) -> list[Kernelcache]:
+        """ The kernelcaches of a device's build (none if the server has no IPSW of it). """
+        self._require("/kernelcache", "1.0")
+        query = urllib.parse.urlencode({"device": device, "build": build})
+        return [Kernelcache.from_dict(kernelcache) for kernelcache in self._get_json(f"/kernelcache?{query}")]
+
     def kernelcache_images(self, uuid: str) -> Optional[list[ImageInfo]]:
         """ The kexts of a kernelcache, the kernel among them; None if the server does not have it. """
+        self._require("/kernelcache/{uuid}/images", "1.0")
         images = self._get_json(f"/kernelcache/{urllib.parse.quote(uuid)}/images")
         return None if images is None else [ImageInfo.from_dict(image) for image in images]
 
@@ -110,12 +123,26 @@ class SymbolicatorClient:
         The functions of an image, at the addresses of its copy in the given shared cache or kernelcache;
         None if the server has no such copy. Kernel addresses go without bit 63.
         """
+        self._require("/images/{uuid}/symbols", "1.0")
         query = {key: value for key, value in (("dsc", dsc), ("kernelcache", kernelcache)) if value is not None}
         path = f"/images/{urllib.parse.quote(uuid)}/symbols"
         if query:
             path += f"?{urllib.parse.urlencode(query)}"
         symbols = self._get_json(path)
         return None if symbols is None else [FunctionSymbol(*symbol) for symbol in symbols]
+
+    def _require(self, route: str, version: str) -> None:
+        """
+        Raise unless the server speaks the given version of the route, the one its caller is written for:
+        the same major, and that minor or a later one.
+        """
+        server_api = self.capabilities.get(route)
+        if server_api is not None:
+            major, minor = map(int, version.split("."))
+            server_major, server_minor = map(int, server_api.split("."))
+            if server_major == major and server_minor >= minor:
+                return
+        raise IncompatibleServerError(self.server, route, server_api, version)
 
     def _get_json(self, path: str):
         """ The JSON a GET answers; None on a 404. """

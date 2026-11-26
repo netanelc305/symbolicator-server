@@ -6,7 +6,9 @@ from typer import style
 
 # Kernel addresses have bit 63 set; the scanner stores them with it cleared, but its func_ names keep it.
 HIGH_BIT = 1 << 63
-API_VERSION = 2  # Bump on every API change
+# What clients from before /capabilities check, so it stays as it is. Routes have their own versions since,
+# next to each of them in server.py.
+API_VERSION = 2
 
 
 @dataclass
@@ -121,6 +123,18 @@ class SharedCache:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SharedCache":
         return cls(data["uuid"], data["shared_region_start"])
+
+
+@dataclass
+class Kernelcache:
+    """ A stored fileset kernelcache: its UUID, its file name in the IPSW and the kernel it holds. """
+    uuid: str
+    path: str
+    kernel_version: Optional[str]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Kernelcache":
+        return cls(data["uuid"], data["path"], data["kernel_version"])
 
 
 @dataclass

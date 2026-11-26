@@ -81,9 +81,10 @@ class DatabaseVersionError(SymbolicatorException):
 
 
 class IncompatibleServerError(SymbolicatorException):
-    """ Raised when the server speaks another API version than this client. """
-    def __init__(self, server: str, server_api: Optional[int], client_api: int):
+    """ Raised when the server speaks another version of a route than this client. """
+    def __init__(self, server: str, route: str, server_api: Optional[str], client_api: str):
         super().__init__()
         self.server = server
-        self.server_api = server_api  # None: the server is from before API versions
+        self.route = route
+        self.server_api = server_api  # None: the server does not have the route
         self.client_api = client_api
